@@ -21,7 +21,7 @@ static int read_line(int fd, char *buf, int maxlen) {
     return total;
 }
 
-static int tokenize(char *line, char **tokens, int max_tokens) {
+int tokenize(char *line, char **tokens, int max_tokens) {
     int count = 0;
     char *p = line;
     while (*p && count < max_tokens - 1) {
@@ -52,7 +52,7 @@ static void print_prompt(void) {
     write(STDOUT_FILENO, "$ ", 2);
 }
 
-static int find_program(const char *name, char *out, size_t outlen) {
+int find_program(const char *name, char *out, size_t outlen) {
     const char *dirs[] = { "/usr/local/bin", "/usr/bin", "/bin", NULL };
     for (int i = 0; dirs[i]; i++) {
         snprintf(out, outlen, "%s/%s", dirs[i], name);
