@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <signal.h>
 
 #define BUF_SIZE 4096
 
@@ -67,6 +68,7 @@ int find_program(const char *name, char *out, size_t outlen) {
 
 int main(int argc, char *argv[]) {
     int interactive = 0;
+    int last_was_signal = 0;
     int in_fd = STDIN_FILENO;
 
     if (argc > 2) {
@@ -85,6 +87,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (interactive) {
+        signal(SIGINT, SIG_IGN);
         write(STDOUT_FILENO, "Welcome to mysh!\n", 17);
     }
 
@@ -94,7 +97,7 @@ int main(int argc, char *argv[]) {
 
     while (1) {
         if (interactive) {
-            if (last_status != 0) {
+            if (last_status != 0 && !last_was_signal) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "Exited with status %d\n", last_status);
                 write(STDOUT_FILENO, msg, strlen(msg));
@@ -180,7 +183,9 @@ int main(int argc, char *argv[]) {
         if (pid < 0) { perror("fork"); continue; }
 
         if (pid == 0) {
-            if (!interactive) {
+            if (interactive) {
+                signal(SIGINT, SIG_DFL);
+            } else {
                 int devnull = open("/dev/null", O_RDONLY);
                 if (devnull >= 0) { dup2(devnull, STDIN_FILENO); close(devnull); }
             }
@@ -193,8 +198,10 @@ int main(int argc, char *argv[]) {
         waitpid(pid, &status, 0);
         if (WIFEXITED(status)) {
             last_status = WEXITSTATUS(status);
+            last_was_signal = 0;
         } else if (WIFSIGNALED(status)) {
             last_status = 1;
+            last_was_signal = 1;
             if (interactive) {
                 char msg[128];
                 snprintf(msg, sizeof(msg), "Terminated by signal %s\n",
