@@ -115,6 +115,8 @@ int main(int argc, char *argv[]) {
             break;
         }
         if (strcmp(tokens[0], "cd") == 0) {
+            last_was_signal = 0;
+
             if (ntok > 2) {
                 write(STDERR_FILENO, "cd: too many arguments\n", 23);
                 last_status = 1;
@@ -134,6 +136,8 @@ int main(int argc, char *argv[]) {
             continue;
         }
         if (strcmp(tokens[0], "pwd") == 0) {
+            last_was_signal = 0;
+
             char cwd[BUF_SIZE];
             if (getcwd(cwd, sizeof(cwd))) {
                 write(STDOUT_FILENO, cwd, strlen(cwd));
@@ -146,6 +150,8 @@ int main(int argc, char *argv[]) {
             continue;
         }
         if (strcmp(tokens[0], "which") == 0) {
+            last_was_signal = 0;
+
             if (ntok != 2) {
                 write(STDERR_FILENO, "which: wrong number of arguments\n", 33);
                 last_status = 1;
@@ -176,6 +182,7 @@ int main(int argc, char *argv[]) {
             write(STDERR_FILENO, tokens[0], strlen(tokens[0]));
             write(STDERR_FILENO, ": command not found\n", 20);
             last_status = 1;
+            last_was_signal = 0;
             continue;
         }
 
