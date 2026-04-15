@@ -12,7 +12,7 @@ static int read_line(int fd, char *buf, int maxlen) {
     char c;
     while (total < maxlen - 1) {
         int n = read(fd, &c, 1);
-        if (n < 0) { perror("read"); exit(1); }
+        if (n < 0) { perror("read"); return -1; }
         if (n == 0) break;
         buf[total++] = c;
         if (c == '\n') break;
@@ -43,9 +43,13 @@ static void print_prompt(void) {
         return;
     }
     size_t hlen = home ? strlen(home) : 0;
-    if (home && strncmp(cwd, home, hlen) == 0) {
+    if (home &&
+        strncmp(cwd, home, hlen) == 0 &&
+        (cwd[hlen] == '\0' || cwd[hlen] == '/')) {
+
         write(STDOUT_FILENO, "~", 1);
         write(STDOUT_FILENO, cwd + hlen, strlen(cwd + hlen));
+
     } else {
         write(STDOUT_FILENO, cwd, strlen(cwd));
     }
@@ -99,7 +103,7 @@ int main(int argc, char *argv[]) {
         }
 
         int len = read_line(in_fd, buf, sizeof(buf));
-        if (len == 0) break;
+        if (len <= 0) break;
 
         int ntok = tokenize(buf, tokens, BUF_SIZE / 2);
         if (ntok == 0) continue;
@@ -108,9 +112,22 @@ int main(int argc, char *argv[]) {
             break;
         }
         if (strcmp(tokens[0], "cd") == 0) {
-            const char *dir = (ntok > 1) ? tokens[1] : getenv("HOME");
+            if (ntok > 2) {
+                write(STDERR_FILENO, "cd: too many arguments\n", 23);
+                last_status = 1;
+                continue;
+            }
+
+            const char *dir = (ntok == 2) ? tokens[1] : getenv("HOME");
             if (!dir) dir = "/";
-            if (chdir(dir) < 0) perror("cd");
+
+            if (chdir(dir) < 0) {
+                perror("cd");
+                last_status = 1;
+            } else {
+                last_status = 0;
+            }
+
             continue;
         }
         if (strcmp(tokens[0], "pwd") == 0) {
@@ -118,19 +135,32 @@ int main(int argc, char *argv[]) {
             if (getcwd(cwd, sizeof(cwd))) {
                 write(STDOUT_FILENO, cwd, strlen(cwd));
                 write(STDOUT_FILENO, "\n", 1);
+                last_status = 0;
             } else {
                 perror("pwd");
+                last_status = 1;
             }
             continue;
         }
         if (strcmp(tokens[0], "which") == 0) {
             if (ntok != 2) {
                 write(STDERR_FILENO, "which: wrong number of arguments\n", 33);
+                last_status = 1;
+            } else if (
+                strcmp(tokens[1], "cd") == 0 ||
+                strcmp(tokens[1], "pwd") == 0 ||
+                strcmp(tokens[1], "which") == 0 ||
+                strcmp(tokens[1], "exit") == 0
+            ) {
+                last_status = 1;
             } else {
                 char path[BUF_SIZE];
                 if (find_program(tokens[1], path, sizeof(path))) {
                     write(STDOUT_FILENO, path, strlen(path));
                     write(STDOUT_FILENO, "\n", 1);
+                    last_status = 0;
+                } else {
+                    last_status = 1;
                 }
             }
             continue;
@@ -138,7 +168,7 @@ int main(int argc, char *argv[]) {
 
         char path[BUF_SIZE];
         if (strchr(tokens[0], '/')) {
-            strncpy(path, tokens[0], sizeof(path));
+            snprintf(path, sizeof(path), "%s", tokens[0]);
         } else if (!find_program(tokens[0], path, sizeof(path))) {
             write(STDERR_FILENO, tokens[0], strlen(tokens[0]));
             write(STDERR_FILENO, ": command not found\n", 20);
