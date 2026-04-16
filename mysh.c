@@ -66,6 +66,132 @@ int find_program(const char *name, char *out, size_t outlen) {
     return 0;
 }
 
+static int run_pipeline(char **tokens, int ntok, int interactive) {
+
+    if (tokens[0][0] == '|' || tokens[ntok - 1][0] == '|') {
+        write(STDERR_FILENO, "syntax error\n", 13);
+        return 1;
+    }
+
+    int seg_start[BUF_SIZE / 2];
+    int seg_count = 0;
+    seg_start[seg_count++] = 0;
+
+    for (int i = 0; i < ntok; i++) {
+        if (tokens[i][0] == '|') {
+            tokens[i] = NULL;
+            if (i + 1 < ntok)
+                seg_start[seg_count++] = i + 1;
+        }
+    }
+
+    for (int s = 0; s < seg_count; s++) {
+        char **seg = tokens + seg_start[s];
+        if (seg[0] == NULL) {
+            write(STDERR_FILENO, "syntax error\n", 13);
+            return 1;
+        }
+    }
+
+    int num_pipes = seg_count - 1;
+    int pipefds[BUF_SIZE / 2][2];
+
+    for (int i = 0; i < num_pipes; i++) {
+        if (pipe(pipefds[i]) < 0) {
+            perror("pipe");
+            for (int j = 0; j < i; j++) {
+                close(pipefds[j][0]);
+                close(pipefds[j][1]);
+            }
+            return 1;
+        }
+    }
+
+    pid_t pids[BUF_SIZE / 2];
+    int launched = 0;
+
+    for (int s = 0; s < seg_count; s++) {
+        char **seg = tokens + seg_start[s];
+
+        int ci = 0;
+        char *clean[BUF_SIZE / 2];
+        for (int i = 0; seg[i] != NULL; i++) {
+            if (!is_operator(seg[i]))
+                clean[ci++] = seg[i];
+        }
+        clean[ci] = NULL;
+
+        if (ci == 0) {
+            write(STDERR_FILENO, "syntax error\n", 13);
+            for (int i = 0; i < num_pipes; i++) {
+                close(pipefds[i][0]);
+                close(pipefds[i][1]);
+            }
+            for (int i = 0; i < launched; i++) waitpid(pids[i], NULL, 0);
+            return 1;
+        }
+
+        char path[BUF_SIZE];
+        if (strchr(clean[0], '/')) {
+            snprintf(path, sizeof(path), "%s", clean[0]);
+        } else if (!find_program(clean[0], path, sizeof(path))) {
+            write(STDERR_FILENO, clean[0], strlen(clean[0]));
+            write(STDERR_FILENO, ": command not found\n", 20);
+            for (int i = 0; i < num_pipes; i++) {
+                close(pipefds[i][0]);
+                close(pipefds[i][1]);
+            }
+            for (int i = 0; i < launched; i++) waitpid(pids[i], NULL, 0);
+            return 1;
+        }
+
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            for (int i = 0; i < num_pipes; i++) {
+                close(pipefds[i][0]);
+                close(pipefds[i][1]);
+            }
+            for (int i = 0; i < launched; i++) waitpid(pids[i], NULL, 0);
+            return 1;
+        }
+
+        if (pid == 0) {
+            if (interactive) signal(SIGINT, SIG_DFL);
+
+            if (s > 0)         dup2(pipefds[s-1][0], STDIN_FILENO);
+            if (s < num_pipes) dup2(pipefds[s][1],   STDOUT_FILENO);
+
+            for (int i = 0; i < num_pipes; i++) {
+                close(pipefds[i][0]);
+                close(pipefds[i][1]);
+            }
+
+            execv(path, clean);
+            perror(path);
+            exit(127);
+        }
+
+        pids[launched++] = pid;
+    }
+
+    for (int i = 0; i < num_pipes; i++) {
+        close(pipefds[i][0]);
+        close(pipefds[i][1]);
+    }
+
+    int last_status = 0;
+    for (int s = 0; s < launched; s++) {
+        int status;
+        waitpid(pids[s], &status, 0);
+        if (s == launched - 1) {
+            if (WIFEXITED(status))        last_status = WEXITSTATUS(status);
+            else if (WIFSIGNALED(status)) last_status = 1;
+        }
+    }
+    return last_status;
+}
+
 int main(int argc, char *argv[]) {
     int interactive = 0;
     int last_was_signal = 0;
