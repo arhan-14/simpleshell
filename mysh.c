@@ -66,6 +66,13 @@ int find_program(const char *name, char *out, size_t outlen) {
     return 0;
 }
 
+static int has_pipe(char **tokens, int ntok){
+    for (int i = 0; i < ntok; i++) {
+        if (tokens[i][0] == '|') return 1;
+    }
+    return 0;
+}
+
 static int run_pipeline(char **tokens, int ntok, int interactive) {
 
     if (tokens[0][0] == '|' || tokens[ntok - 1][0] == '|') {
@@ -298,6 +305,12 @@ int main(int argc, char *argv[]) {
                     last_status = 1;
                 }
             }
+            continue;
+        }
+
+        if (has_pipe(tokens, ntok)) {
+            last_status = run_pipeline(tokens, ntok, interactive);
+            last_was_signal = 0;
             continue;
         }
 
